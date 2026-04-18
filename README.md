@@ -56,7 +56,9 @@
 
 ---
 
+```
 ## 파일 구조
+
 trump_market_impact/
 ├── app.py                      # Streamlit 대시보드 메인
 ├── get_market_data.py          # 주가/유가 데이터 수집
@@ -68,12 +70,12 @@ trump_market_impact/
 ├── stats.py                    # 통계 분석
 ├── visualize.py                # matplotlib 시각화
 └── data/
-├── djt_posts_dec2025.csv       # 트럼프 발언 원본
-├── war_tweets_filtered.csv     # 필터링된 전쟁 발언
-├── market_data.csv             # 주가/유가 데이터
-├── analysis_result.csv         # 이벤트 분석 결과
-└── case_analysis.csv           # 케이스별 분석 결과
-
+    ├── djt_posts_dec2025.csv       # 트럼프 발언 원본
+    ├── war_tweets_filtered.csv     # 필터링된 전쟁 발언
+    ├── market_data.csv             # 주가/유가 데이터
+    ├── analysis_result.csv         # 이벤트 분석 결과
+    └── case_analysis.csv           # 케이스별 분석 결과
+```
 ---
 
 ## 주요 파일 역할
