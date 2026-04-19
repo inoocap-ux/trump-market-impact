@@ -15,13 +15,15 @@ def load_data():
     market.index = pd.to_datetime(market.index).tz_localize(None)
     tweets = pd.read_csv('data/war_tweets_filtered.csv')
     tweets['date_only'] = pd.to_datetime(tweets['date_only'])
-    results = pd.read_csv('data/analysis_result.csv')
-    results['date'] = pd.to_datetime(results['date'])
+    df_all = pd.read_csv('data/analysis_result.csv')
+    df_all['date'] = pd.to_datetime(df_all['date'])
     case_df = pd.read_csv('data/case_analysis.csv')
     case_df['date'] = pd.to_datetime(case_df['date'])
-    return market, tweets, results, case_df
+    window_df = pd.read_csv('data/window_analysis.csv')
+    intent_df = pd.read_csv('data/intent_analysis.csv')
+    return market, tweets, df_all, case_df, window_df, intent_df
 
-market, tweets, results, case_df = load_data()
+market, tweets, df_all, case_df, window_df, intent_df = load_data()
 
 events = [
     ('2026-01-08', 'Locked & Loaded', 'orange'),
@@ -89,7 +91,6 @@ with tab1:
                         line_color=color, opacity=0.7,
                         row=i+1, col=1
                     )
-        # 범례용 더미 trace
         for date_str, label, color in events:
             fig.add_trace(go.Scatter(
                 x=[None], y=[None],
@@ -116,21 +117,76 @@ with tab1:
     st.plotly_chart(fig, width='stretch')
 
 with tab2:
-    st.subheader("📊 이벤트 단계별 평균 변동률")
-    results_2026 = results[results['date'] >= '2026-01-01'].copy()
+    st.subheader("📊 발언일 vs 비발언일 익일 변동률 비교")
+    st.caption("※ 본 분석은 트럼프 전쟁 관련 발언이 있던 날과 없던 날의 익일 변동률을 비교한 것입니다.")
 
-    def get_phase(date):
-        if date < pd.Timestamp('2026-02-28'):
-            return '① 경고단계'
-        elif date <= pd.Timestamp('2026-03-31'):
-            return '② 전쟁발발'
-        else:
-            return '③ 호르무즈위기'
+    compare_data = []
+    for ticker in ['WTI', 'DOW', 'XOM', 'LYB']:
+        sub = df_all[df_all['ticker'] == ticker]
+        event = sub[sub['is_event'] == True]['change_pct']
+        non_event = sub[sub['is_event'] == False]['change_pct']
+        compare_data.append({
+            '종목': ticker,
+            '발언일 평균': f"{event.mean():+.2f}%",
+            '발언일 상승비율': f"{(event>0).mean()*100:.1f}%",
+            '비발언일 평균': f"{non_event.mean():+.2f}%",
+            '비발언일 상승비율': f"{(non_event>0).mean()*100:.1f}%",
+            '차이': f"{event.mean() - non_event.mean():+.2f}%"
+        })
+    compare_df = pd.DataFrame(compare_data)
+    st.dataframe(compare_df, hide_index=True)
+    st.warning("⚠️ 모든 종목에서 발언일 익일 변동률이 비발언일보다 낮게 나타납니다.")
 
-    results_2026['phase'] = results_2026['date'].apply(get_phase)
-    phase_stats = results_2026.groupby(['phase', 'ticker'])['change_pct'].mean().unstack()
-    st.dataframe(phase_stats.style.format("{:.2f}%").background_gradient(cmap='RdYlGn', axis=None))
+    st.markdown("---")
+    st.subheader("📅 주요 발언 전후 5일 WTI 누적 변동률")
+    st.caption("※ 발언 5일 전 → 발언일, 발언일 → 발언 5일 후 WTI 누적 변동률")
 
+    fig_window = go.Figure()
+    fig_window.add_trace(go.Bar(
+        x=window_df['event'],
+        y=window_df['before_5d'],
+        name='발언 5일 전→발언일',
+        marker_color='steelblue'
+    ))
+    fig_window.add_trace(go.Bar(
+        x=window_df['event'],
+        y=window_df['after_5d'],
+        name='발언일→발언 5일 후',
+        marker_color='tomato'
+    ))
+    fig_window.update_layout(
+        barmode='group',
+        title='주요 발언 전후 5일 WTI 누적 변동률',
+        yaxis_title='변동률 (%)',
+        height=450
+    )
+    st.plotly_chart(fig_window, width='stretch')
+    st.info("💡 전쟁 초반(1월-2월) 발언 후 상승 → 전쟁 후반(3월-4월) 발언 후 하락. 발언 영향력이 시간이 지날수록 약해지는 패턴.")
+    st.markdown("---")
+    st.subheader("🔍 스페셜 케이스 - 트럼프 유가 조절자 가설")
+    st.caption("※ 샘플 수가 적어 통계적 유의성은 낮으나 흥미로운 패턴이 관찰됨")
+
+    zone_stats = intent_df.groupby('wti_zone')['wti_next_change'].agg(['mean', 'count']).reset_index()
+    zone_stats.columns = ['WTI 구간', '익일 평균 변동률(%)', '발언 수']
+    zone_stats['익일 평균 변동률(%)'] = zone_stats['익일 평균 변동률(%)'].round(2)
+    zone_order = ['저유가(~65)', '중유가(65~80)', '고유가(80~95)', '초고유가(95~)']
+    zone_stats['WTI 구간'] = pd.Categorical(zone_stats['WTI 구간'], categories=zone_order, ordered=True)
+    zone_stats = zone_stats.sort_values('WTI 구간')
+    st.dataframe(zone_stats, hide_index=True)
+    st.warning("⚠️ 샘플 수가 적어 통계적 유의성은 낮으나 흥미로운 두 단계 패턴이 관찰됨.")
+    st.markdown("""
+**1단계 (전쟁 초반):** 강경 발언 → 유가 상승  
+→ 전쟁 명분 쌓기, 시장에 긴장감 주입
+
+**2단계 (전쟁 후반):** 유화/종전 발언 → 유가 하락  
+→ 유가 급등으로 인한 민심 불안 완화 목적  
+→ 실제로 트럼프는 4월 발언에서 "기름값 좀 더 내도 된다"고 직접 언급
+
+**결론:** 트럼프가 전쟁 국면에 따라 발언 강도를 조절하며 유가에 영향을 미쳤을 가능성이 있음.  
+단, 인과관계 단정은 어려우며 유가 불안 시 발언이 많아지는 역인과 가능성도 존재.
+    """)
+    
+    st.markdown("---")
     st.subheader("🔗 WTI vs 화학주 상관관계 (2026년)")
     market_2026 = market[market.index >= '2026-01-01']
     col1, col2, col3 = st.columns(3)
@@ -138,13 +194,30 @@ with tab2:
     col2.metric("WTI vs XOM", f"{market_2026['WTI'].corr(market_2026['XOM']):.3f}")
     col3.metric("WTI vs LYB", f"{market_2026['WTI'].corr(market_2026['LYB']):.3f}")
 
-    st.subheader("💥 최대 충격 이벤트 TOP5 (WTI 기준)")
-    wti_results = results_2026[results_2026['ticker'] == 'WTI'].copy()
+    st.markdown("---")
+    st.subheader("💥 최대 충격 이벤트 TOP5 (WTI 기준 발언일 익일 변동률)")
+    wti_results = df_all[(df_all['ticker'] == 'WTI') & (df_all['is_event'] == True)].copy()
     wti_results['abs_change'] = wti_results['change_pct'].abs()
-    top5 = wti_results.nlargest(5, 'abs_change')[['date', 'change_pct', 'price_day0', 'price_day1']]
-    top5.columns = ['날짜', '변동률(%)', '발언일 종가', '익일 종가']
+    top5 = wti_results.nlargest(5, 'abs_change')[['date', 'change_pct']].copy()
+    
+    # 발언일/익일 종가 다시 계산
+    prices = []
+    for _, row in top5.iterrows():
+        date = pd.Timestamp(row['date'])
+        if date in market.index:
+            future = market.index[market.index > date]
+            price_day0 = market.loc[date, 'WTI']
+            price_day1 = market.loc[future[0], 'WTI'] if len(future) > 0 else None
+        else:
+            price_day0, price_day1 = None, None
+        prices.append({'발언일 종가': price_day0, '익일 종가': price_day1})
+    
+    prices_df = pd.DataFrame(prices)
+    top5 = top5.reset_index(drop=True)
+    top5 = pd.concat([top5, prices_df], axis=1)
+    top5.columns = ['날짜', '익일 변동률(%)', '발언일 종가', '익일 종가']
     st.dataframe(top5.style.format({
-        '변동률(%)': '{:.2f}%',
+        '익일 변동률(%)': '{:.2f}%',
         '발언일 종가': '${:.2f}',
         '익일 종가': '${:.2f}'
     }))
